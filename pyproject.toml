@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tart-transient-search"
+version = "0.1.0"
+license = {text = "MIT"}
+description = "Transient search pipeline for the TART radio telescope array"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.scripts]
+tart-transient = "tart_transient.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

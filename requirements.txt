@@ -1,0 +1,21 @@
+# TART toolchain
+tart_tools
+tart2ms
+disko
+stimela>=2.0
+
+# radio astronomy
+python-casacore
+casatasks
+astropy
+photutils
+
+# numerics / io
+numpy
+scipy
+pandas
+h5py
+matplotlib
+minio
+tqdm
+PyYAML

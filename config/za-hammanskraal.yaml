@@ -1,0 +1,38 @@
+# Run configuration — za-hammanskraal
+name: za-hammanskraal
+
+download:
+  target: za-hammanskraal      
+  start: "2026-08-24T06:08:29+00:00"                
+  duration_min: 2
+  n_files: 1                   
+
+catalogue:
+  filter_elevation_deg: 5.0    
+                               
+  min_flux: 100.0
+
+calibration:
+
+  mode: auto                   # auto | always | never
+  minsnr: 2.0                 
+  solint: inf
+  applymode: calonly          
+
+imaging:
+  nvis: 4000
+  fov: 170deg
+  res: 1.0deg
+  healpix: true
+  lasso: true
+  alpha: 0.006
+  l1_ratio: 0.02
+
+significance:
+  null_trials: 400             
+  null_percentile: 99.0
+  trials_null_samples: 20000    
+  false_alarm_rate: 0.01      
+
+search:
+  source_finder_sigma: 5.0     

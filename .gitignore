@@ -1,0 +1,34 @@
+# ---- pipeline outputs -------------------------------------------------
+# Everything a run produces. Regenerate with `make run`, never commit:
+# a single measurement set is hundreds of MB and GitHub rejects >100 MB files.
+runs/
+*.ms/
+*.hdf
+*.fits
+.tartcache/
+
+# ---- tool logs --------------------------------------------------------
+# tart2ms and CASA drop timestamped logs into the working directory.
+logs/
+*.log
+tart2ms.*.log
+casa-*.log
+casa_*.log
+ipython-*.log
+
+# ---- python -----------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# ---- editors and OS ---------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+*.swp
