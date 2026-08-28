@@ -11,6 +11,15 @@ catalogue:
   filter_elevation_deg: 5.0    
                                
   min_flux: 100.0
+  # modelled but NOT subtracted, e.g. ['sun']
+  keep_sources: []
+  # subtract the Sun and EGNOS/SDCM payloads that
+  # tart2ms's name filter drops, rather than only vetoing them
+  subtract_unmodelled: true
+
+measurement_set:
+  # true skips tart2ms if the MS already exists -- for re-analysis
+  reuse_existing: false
 
 calibration:
 
@@ -35,4 +44,14 @@ significance:
   false_alarm_rate: 0.01      
 
 search:
-  source_finder_sigma: 5.0     
+  source_finder_sigma: 5.0
+  # search these fractions of the observation, best of
+  time_windows: [1, 2, 4, 8]
+  window_map:
+    # image each time window and keep the pixel-wise max,
+    # so a source that brightens mid-observation still
+    # produces a position to test
+    enabled: true
+    n_side: 110
+    n_windows: 6
+    n_peaks: 40     

@@ -10,7 +10,6 @@ import yaml
 
 @dataclass
 class Config:
-    """Parsed run configuration, plus the derived output paths."""
 
     name: str
     raw: Dict[str, Any] = field(repr=False)

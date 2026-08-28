@@ -15,7 +15,6 @@ def empirical_null(uvw: np.ndarray, freqs_hz: np.ndarray, data: np.ndarray,
                    ra0_deg: float, dec0_deg: float, n_trials: int = 400,
                    percentile: float = 99.0, seed: int = 12345,
                    base_model: Optional[np.ndarray] = None) -> Tuple[float, np.ndarray]:
-    """SNR distribution of the coherent fit at positions with NO source."""
     rng = np.random.default_rng(seed)
     wl = C_LIGHT / freqs_hz
     u = uvw[:, 0][:, None] / wl[None, :]
@@ -33,7 +32,7 @@ def empirical_null(uvw: np.ndarray, freqs_hz: np.ndarray, data: np.ndarray,
         l = np.cos(dd) * np.sin(rr - ra0)
         m = np.sin(dd) * np.cos(dec0) - np.cos(dd) * np.sin(dec0) * np.cos(rr - ra0)
         if l * l + m * m >= 1.0:
-            continue                      # below the horizon of this projection
+            continue
         n = np.sqrt(max(1.0 - l * l - m * m, 0.0))
         M = np.exp(PHASE_SIGN * 2.0j * np.pi * (u * l + v * m + w * (n - 1.0)))
 
@@ -69,14 +68,12 @@ def empirical_null(uvw: np.ndarray, freqs_hz: np.ndarray, data: np.ndarray,
 
 def trials_threshold(samples: np.ndarray, n_looks: int,
                      false_alarm_rate: float = 0.01) -> float:
-    """Threshold corrected for having tested ``n_looks`` positions."""
     if not len(samples):
         return float("inf")
     q = 100.0 * (1.0 - false_alarm_rate / max(n_looks, 1))
     return float(np.percentile(samples, min(q, 100.0)))
 
 def zenith_angle_deg(ra_deg, dec_deg, ra0_deg: float, dec0_deg: float):
-    """Angle from the phase centre, which for a zenith-pointing TART is the"""
     r1, d1 = np.radians(ra_deg), np.radians(dec_deg)
     r0, d0 = np.radians(ra0_deg), np.radians(dec0_deg)
     cosang = (np.sin(d1) * np.sin(d0)
@@ -86,8 +83,7 @@ def zenith_angle_deg(ra_deg, dec_deg, ra0_deg: float, dec0_deg: float):
 
 def null_with_zenith(uvw, freqs_hz, data, ra0_deg: float, dec0_deg: float,
                      n_trials: int = 20000, seed: int = 4242,
-                     max_zenith_deg: float = 85.0):
-    """Null SNR draws, each tagged with the zenith angle it was drawn at."""
+                     max_zenith_deg: float = 85.0, times=None, splits=None):
     rng = np.random.default_rng(seed)
     wl = C_LIGHT / freqs_hz
     u = uvw[:, 0][:, None] / wl[None, :]
@@ -111,6 +107,14 @@ def null_with_zenith(uvw, freqs_hz, data, ra0_deg: float, dec0_deg: float,
             continue
         n = np.sqrt(max(1.0 - l * l - m * m, 0.0))
         M = np.exp(PHASE_SIGN * 2.0j * np.pi * (u * l + v * m + w * (n - 1.0)))
+        if splits and times is not None:
+            from .search import snr_at_windows
+            val = snr_at_windows(uvw, freqs_hz, data, times, ra0_deg, dec0_deg,
+                                 ra, dec, splits)[0]
+            if val > 0:
+                snrs.append(float(val))
+                zen.append(z)
+            continue
         denom = np.vdot(M, M)
         if abs(denom) == 0:
             continue
@@ -124,9 +128,7 @@ def null_with_zenith(uvw, freqs_hz, data, ra0_deg: float, dec0_deg: float,
 
 
 class ZenithNull:
-    """Position-matched detection threshold."""
 
-    # scale_percentile must be a tail quantile: 90 carries none of the effect
     def __init__(self, samples, zeniths, n_bins: int = 6,
                  scale_percentile: float = 99.0, max_zenith_deg: float = 85.0,
                  min_per_bin: int = 500):
@@ -142,7 +144,7 @@ class ZenithNull:
             if m.sum() >= 30:
                 centres.append(float(np.median(zeniths[m])))
                 scales.append(float(np.percentile(samples[m], scale_percentile)))
-        if not centres:                       # degenerate: fall back to global
+        if not centres:
             centres = [0.0, max_zenith_deg]
             g = float(np.percentile(samples, scale_percentile)) if len(samples) else 1.0
             scales = [g, g]
@@ -153,11 +155,15 @@ class ZenithNull:
         self.normalised = samples / self.scale(zeniths)
 
     def scale(self, zenith_deg):
-        """Local noise scale, linearly interpolated between bin centres."""
         return np.interp(zenith_deg, self._centres, self._scales)
 
-    def threshold(self, n_looks: int, false_alarm_rate: float = 0.01) -> float:
-        """Trials-corrected threshold in NORMALISED units."""
+    def threshold(self, n_looks: int, false_alarm_rate: float = 0.01,
+                  method: str = "tail") -> float:
+        if method == "tail":
+            t = tail_threshold(self.normalised, n_looks, false_alarm_rate)
+            if np.isfinite(t):
+                return t
+            log.warning("tail fit failed; falling back to empirical quantile")
         return trials_threshold(self.normalised, n_looks, false_alarm_rate)
 
     def snr_normalised(self, snr: float, zenith_deg: float) -> float:
@@ -171,3 +177,38 @@ class ZenithNull:
                 "scale_ratio_rim_to_zenith":
                     round(float(self._scales[-1] / self._scales[0]), 3)
                     if len(self._scales) > 1 and self._scales[0] > 0 else None}
+
+def tail_threshold(samples, n_looks: int, false_alarm_rate: float = 0.01,
+                   n_tail: int = 500, return_fit: bool = False):
+    samples = np.asarray(samples, dtype=float)
+    samples = samples[np.isfinite(samples)]
+    if len(samples) < 20:
+        return (float("inf"), {}) if return_fit else float("inf")
+
+    ordered = np.sort(samples)[::-1]
+    n_tail = int(max(20, min(n_tail, len(ordered) // 2)))
+    x = ordered[:n_tail]
+    y = np.arange(1, n_tail + 1, dtype=float)
+    keep = x > 0
+    x, y = x[keep], y[keep]
+    if len(x) < 20 or np.ptp(x) <= 0:
+        return (float("inf"), {}) if return_fit else float("inf")
+
+    A = np.column_stack([np.ones_like(x), -x])
+    coef, *_ = np.linalg.lstsq(A, np.log(y), rcond=None)
+    log_nhat, inv_rho = float(coef[0]), float(coef[1])
+    if not np.isfinite(inv_rho) or inv_rho <= 0:
+        return (float("inf"), {}) if return_fit else float("inf")
+    rhohat = 1.0 / inv_rho
+
+    n_target = len(samples) * false_alarm_rate / max(n_looks, 1)
+    thr = rhohat * (log_nhat - np.log(max(n_target, 1e-300)))
+
+    if return_fit:
+        pred = np.exp(log_nhat - x / rhohat)
+        ss = 1.0 - np.sum((np.log(y) - np.log(pred)) ** 2) / \
+            max(np.sum((np.log(y) - np.log(y).mean()) ** 2), 1e-12)
+        return float(thr), {"rhohat": rhohat, "log_nhat": log_nhat,
+                            "n_tail": int(len(x)), "r2_log": float(ss),
+                            "n_target": float(n_target)}
+    return float(thr)

@@ -122,44 +122,106 @@ def effectiveness(before, after, power, rms_change, peak_change, out: Path):
 
 def transient_search(after, half, wcs, npix, pix, result, out: Path):
     cands = result["candidates"]
-    fig, ax = plt.subplots(1, 2, figsize=(18, 8))
-    _sky(ax[0], after, half, "residual, every peak tested")
+    ranked = sorted(cands, key=lambda c: -float(c.get("vis_snr", 0)))
+    best = ranked[0] if ranked else None
+    CYAN = "#00838f"
+    wm = result.get("window_map")
+
+    fig, ax = plt.subplots(1, 4, figsize=(25, 6.4))
+
+    _sky(ax[0], after, half, "residual, whole observation")
     for c in cands:
         px, py = wcs.wcs_world2pix(c["ra_deg"], c["dec_deg"], 0)
         x, y = (float(px) - npix / 2) * pix, (float(py) - npix / 2) * pix
-        col = GREEN if c["confirmed"] else (AMBER if c["passes_single_look"] else RED)
-        ax[0].plot(x, y, "o", ms=9, mfc="none", mec=col, mew=1.8, zorder=4)
-    ax[0].legend(handles=[
-        Line2D([], [], color=GREEN, marker="o", ls="none", mfc="none", mew=1.8,
-               label="confirmed"),
-        Line2D([], [], color=AMBER, marker="o", ls="none", mfc="none", mew=1.8,
-               label="passed single look, failed trials correction"),
-        Line2D([], [], color=RED, marker="o", ls="none", mfc="none", mew=1.8,
-               label="rejected")], loc="lower left", fontsize=8)
-    if cands:
-        el = [c["elevation_deg"] for c in cands]
-        ax[1].scatter(el, [c["vis_snr"] for c in cands], s=42, zorder=3,
-                      color=[GREEN if c["confirmed"] else
-                             (AMBER if c["passes_single_look"] else RED)
-                             for c in cands])
-        order = np.argsort(el)
-        ax[1].plot(np.array(el)[order],
-                   np.array([c["threshold_here"] for c in cands])[order],
-                   color=RED, ls="--", lw=2,
-                   label="trials-corrected threshold at this elevation")
-        ax[1].set_xlabel("elevation (deg)")
-        ax[1].set_ylabel("coherent fit SNR at that position")
-        ax[1].invert_xaxis()
-        ax[1].legend(fontsize=9)
-        ax[1].set_title("threshold rises toward the horizon:\n"
-                        "the null tail is ~35% heavier below 20 deg elevation",
-                        fontsize=10)
-    fig.suptitle("6 - transient search: {} peaks -> {} single-look -> {} confirmed".format(
-        result["n_peaks"], result["n_passed_single_look"], result["n_confirmed"]),
-        fontsize=12)
-    fig.tight_layout(); fig.savefig(out, dpi=115); plt.close(fig)
+        ax[0].plot(x, y, "o", ms=6, mfc="none", mec=GREY, mew=1.0, zorder=3)
+    if best is not None:
+        px, py = wcs.wcs_world2pix(best["ra_deg"], best["dec_deg"], 0)
+        bx, by = (float(px) - npix / 2) * pix, (float(py) - npix / 2) * pix
+        ax[0].plot(bx, by, "o", ms=26, mfc="none", mec=CYAN, mew=3, zorder=6)
 
+    if wm is not None:
+        amap, gx = wm
+        ax[1].imshow(amap, origin="lower", extent=[-1, 1, -1, 1], cmap="inferno")
+        th = np.linspace(0, 2 * np.pi, 200)
+        ax[1].plot(np.cos(th), np.sin(th), color="w", lw=1, alpha=.4)
+        if best is not None:
+            from .fitting import lmn
+            l, m, _n = lmn(best["ra_deg"], best["dec_deg"],
+                           result.get("ra0_deg", 0.0), result.get("dec0_deg", 0.0))
+            ax[1].plot(float(l), float(m), "o", ms=26, mfc="none", mec=CYAN,
+                       mew=3, zorder=6)
+        ax[1].set_xlabel("l"); ax[1].set_ylabel("m")
+        ax[1].set_title("best of each time window", fontsize=11)
+    else:
+        ax[1].axis("off")
+
+    if cands:
+        el = np.array([c["elevation_deg"] for c in cands], dtype=float)
+        sn = np.array([float(c["vis_snr"]) for c in cands])
+        thr = np.array([float(c["threshold_here"]) for c in cands])
+        ax[2].scatter(el, sn, s=45, color=GREY, zorder=3)
+        o = np.argsort(el)
+        ax[2].plot(el[o], thr[o], color=RED, ls="--", lw=2, label="threshold")
+        if best is not None:
+            ax[2].scatter([float(best["elevation_deg"])], [float(best["vis_snr"])],
+                          s=220, facecolors="none", edgecolors=CYAN,
+                          linewidths=3, zorder=6)
+        ax[2].set_xlabel("elevation (deg)"); ax[2].set_ylabel("SNR")
+        ax[2].invert_xaxis(); ax[2].legend(fontsize=9); ax[2].grid(alpha=.25)
+        ax[2].set_title("SNR vs elevation", fontsize=11)
+
+        w = np.array([int(c.get("best_window_split", 1)) for c in cands],
+                     dtype=float)
+        jit = np.random.default_rng(0).normal(0.0, 0.03, len(w))
+        ax[3].scatter(w * (1.0 + jit), sn, s=45, color=GREY, zorder=3)
+        if best is not None:
+            ax[3].scatter([int(best.get("best_window_split", 1))],
+                          [float(best["vis_snr"])], s=220, facecolors="none",
+                          edgecolors=CYAN, linewidths=3, zorder=6)
+        ax[3].set_xscale("log", base=2)
+        ax[3].set_xlim(0.7, max(16, w.max() * 2))
+        ax[3].set_xlabel("best time window"); ax[3].set_ylabel("SNR")
+        ax[3].grid(alpha=.25)
+        ax[3].set_title("SNR vs timescale", fontsize=11)
+
+    fig.suptitle("transient search: %d peaks, %d above threshold, %d unexplained"
+                 % (result["n_peaks"], result["n_passed_single_look"],
+                    result["n_unexplained"]), fontsize=12)
+    fig.tight_layout(); fig.savefig(out, dpi=115); plt.close(fig)
 
 def write_summary(record: dict, out: Path):
     with open(out, "w") as f:
         json.dump(record, f, indent=2, default=float)
+
+
+def epoch_comparison(quiet, burst, diff, record, out):
+    import numpy as np
+    fig, ax = plt.subplots(2, 3, figsize=(16.5, 10.5))
+    tgt = record.get("target")
+    vmax = float(np.nanpercentile(burst[np.isfinite(burst)], 99.99))
+    dv = float(np.nanpercentile(np.abs(diff[np.isfinite(diff)]), 99.9))
+    panels = ((quiet, "QUIET  " + record["quiet"]["t_start"][11:19] + " UTC", "inferno", 0, vmax),
+              (burst, "BURST  " + record["burst"]["t_start"][11:19] + " UTC", "inferno", 0, vmax),
+              (diff, "DIFFERENCE  (burst - quiet)", "RdBu_r", -dv, dv))
+    for k, (im, ttl, cm, lo, hi) in enumerate(panels):
+        a = ax[0][k]
+        a.imshow(im, origin="lower", cmap=cm, vmin=lo, vmax=hi)
+        a.set_title(ttl, fontsize=12)
+        a.set_xticks([]); a.set_yticks([])
+        b = ax[1][k]
+        if tgt:
+            x, y = tgt["pixel"]; i, j = int(round(y)), int(round(x))
+            Z = 200
+            a.add_patch(plt.Circle((x, y), 70, fill=False, ec="#00e5ff", lw=2))
+            b.imshow(im[max(0, i-Z):i+Z, max(0, j-Z):j+Z], origin="lower",
+                     cmap=cm, vmin=lo, vmax=hi)
+            b.add_patch(plt.Circle((Z, Z), 70, fill=False, ec="#00e5ff", lw=2.2))
+        b.set_xticks([]); b.set_yticks([])
+    if tgt:
+        ax[1][0].set_title("peak %.4f" % tgt["quiet"], fontsize=11)
+        ax[1][1].set_title("peak %.4f   (%.1fx brighter)"
+                           % (tgt["burst"], tgt["ratio"]), fontsize=11)
+        ax[1][2].set_title("change %.1f rms" % tgt["change_rms"], fontsize=11)
+    fig.suptitle("Same pipeline, two epochs — %s vs %s"
+                 % (record["quiet"]["run"], record["burst"]["run"]), fontsize=13)
+    fig.tight_layout(); fig.savefig(out, dpi=115); plt.close(fig)

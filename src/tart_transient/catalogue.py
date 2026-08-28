@@ -19,7 +19,6 @@ _cache: Dict[str, pd.DataFrame] = {}
 
 
 def load(path: Path) -> pd.DataFrame:
-    """Read one ``model_sources_<N>.txt``, with caching."""
     key = str(path)
     if key in _cache:
         return _cache[key]
@@ -34,7 +33,6 @@ def load(path: Path) -> pd.DataFrame:
 
 @dataclass
 class CatalogueIndex:
-    """Maps observation time to the right catalogue snapshot."""
 
     indices: List[int]
     paths: List[Path]
@@ -84,7 +82,6 @@ class CatalogueIndex:
         return df
 
     def positions_for(self, times: np.ndarray, names: List[str]) -> np.ndarray:
-        """Per-row (RA, Dec) for each named source. Shape (n_src, n_row, 2)."""
         if self.unique_times is None:
             raise RuntimeError("build the index with ms_path= for exact mapping")
         ep = np.clip(np.searchsorted(self.unique_times, times),
@@ -112,7 +109,6 @@ class CatalogueIndex:
 
 
 def merge_within_beam(cat: pd.DataFrame, beam_deg: float) -> Tuple[pd.DataFrame, dict]:
-    """Collapse sources the array cannot separate."""
     if not len(cat):
         return cat, {}
 
@@ -153,3 +149,107 @@ def merge_within_beam(cat: pd.DataFrame, beam_deg: float) -> Tuple[pd.DataFrame,
     log.info("catalogue %d -> %d after beam merge (%.2f deg)",
              len(cat), len(merged), beam_deg)
     return merged, groups
+
+
+def full_sky(lat_deg: float, lon_deg: float, obstime_iso: str,
+             site: str, min_elevation_deg: float = 0.0):
+    import pandas as pd
+    from datetime import datetime
+    from astropy.coordinates import AltAz, EarthLocation, SkyCoord
+    from astropy.time import Time
+    import astropy.units as u
+    from tart_tools import api_handler
+
+    api = api_handler.APIhandler(f"https://api.elec.ac.nz/tart/{site}")
+    url = api.catalog_url(lon=lon_deg, lat=lat_deg, datestr=obstime_iso)
+    url += f"&elevation={min_elevation_deg}"
+    raw = api.get_url(url)
+
+    loc = EarthLocation(lat=lat_deg * u.deg, lon=lon_deg * u.deg)
+    when = Time(datetime.fromisoformat(obstime_iso))
+    rows = []
+    for s_ in raw:
+        el = float(s_.get("el", -99.0))
+        if el < min_elevation_deg:
+            continue
+        icrs = SkyCoord(alt=el * u.deg, az=float(s_.get("az", 0.0)) * u.deg,
+                        frame=AltAz(obstime=when, location=loc)).icrs
+        rows.append({"name": s_.get("name", "?"), "ra_d": icrs.ra.deg,
+                     "dec_d": icrs.dec.deg, "el_d": el})
+    return pd.DataFrame(rows)
+
+
+def unmodelled_tracks(lat_deg: float, lon_deg: float, site: str,
+                      epochs_iso, modelled_names, min_elevation_deg: float = 5.0):
+    import numpy as np
+    from datetime import datetime
+    from astropy.coordinates import AltAz, EarthLocation, SkyCoord, get_body
+    from astropy.time import Time
+    import astropy.units as u
+    from tart_tools import api_handler
+
+    import re as _re
+
+    def _norm(n):
+        n = str(n).split("[")[0].replace("_", " ")
+        n = _re.sub(r"\(.*?\)", " ", n)
+        return _re.sub(r"\s+", " ", n).strip().lower()
+
+    known = {_norm(n) for n in modelled_names}
+    loc = EarthLocation(lat=lat_deg * u.deg, lon=lon_deg * u.deg)
+    api = api_handler.APIhandler(f"https://api.elec.ac.nz/tart/{site}")
+
+    names, per_epoch = None, []
+    for iso in epochs_iso:
+        when = Time(datetime.fromisoformat(iso))
+        url = api.catalog_url(lon=lon_deg, lat=lat_deg, datestr=iso)
+        url += f"&elevation={min_elevation_deg}"
+        rows = []
+        for entry in api.get_url(url):
+            nm = str(entry.get("name", "?"))
+            if _norm(nm) in known:
+                continue
+            el = float(entry.get("el", -99.0))
+            if el < min_elevation_deg:
+                continue
+            icrs = SkyCoord(alt=el * u.deg, az=float(entry.get("az", 0.0)) * u.deg,
+                            frame=AltAz(obstime=when, location=loc)).icrs
+            rows.append((nm, icrs.ra.deg, icrs.dec.deg))
+        rows.sort()
+        if names is None:
+            names = [r[0] for r in rows]
+        per_epoch.append({r[0]: (r[1], r[2]) for r in rows})
+
+    names = [n for n in (names or []) if all(n in e for e in per_epoch)]
+    if not names:
+        return [], np.zeros((0, len(epochs_iso), 2))
+    tracks = np.array([[per_epoch[i][n] for i in range(len(epochs_iso))]
+                       for n in names], dtype=float)
+    return names, tracks
+
+
+SOLAR_SYSTEM = ("sun", "moon", "mercury", "venus", "mars", "jupiter",
+                "saturn", "uranus", "neptune")
+
+
+def fix_solar_system_positions(names, tracks, times_mjd_s, lat_deg, lon_deg):
+    import numpy as np
+    from astropy.coordinates import EarthLocation, get_body
+    from astropy.time import Time
+    import astropy.units as u
+
+    idx = [i for i, n in enumerate(names)
+           if str(n).split("_")[0].split(" ")[0].strip().lower() in SOLAR_SYSTEM]
+    if not idx:
+        return 0
+
+    ut, inv = np.unique(times_mjd_s, return_inverse=True)
+    when = Time(ut / 86400.0, format="mjd")
+    for i in idx:
+        body = str(names[i]).split("_")[0].split(" ")[0].strip().lower()
+        pos = get_body(body, when)
+        tracks[i, :, 0] = np.asarray(pos.ra.deg)[inv]
+        tracks[i, :, 1] = np.asarray(pos.dec.deg)[inv]
+    log.info("corrected apparent positions for %d solar-system body/bodies: %s",
+             len(idx), ", ".join(str(names[i]) for i in idx))
+    return len(idx)

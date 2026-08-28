@@ -21,7 +21,6 @@ class PointSource:
 
 
 def lmn(ra_deg, dec_deg, ra0_deg, dec0_deg):
-    """Direction cosines of a position relative to the phase centre."""
     ra, dec = np.radians(ra_deg), np.radians(dec_deg)
     ra0, dec0 = np.radians(ra0_deg), np.radians(dec0_deg)
     l = np.cos(dec) * np.sin(ra - ra0)
@@ -30,12 +29,11 @@ def lmn(ra_deg, dec_deg, ra0_deg, dec0_deg):
     return l, m, n
 
 
-PHASE_SIGN = +1.0  # measured; textbook -1 point-reflects the sky
+PHASE_SIGN = +1.0
 
 
 def model_matrix(uvw: np.ndarray, freqs_hz: np.ndarray,
                  tracks: np.ndarray, ra0_deg: float, dec0_deg: float) -> np.ndarray:
-    """Unit-amplitude model with a per-row direction for each source."""
     n_row, n_chan, n_src = uvw.shape[0], freqs_hz.shape[0], tracks.shape[0]
     mat = np.zeros((n_row, n_chan, n_src), dtype=np.complex128)
     wl = C_LIGHT / freqs_hz
@@ -57,7 +55,6 @@ def model_matrix(uvw: np.ndarray, freqs_hz: np.ndarray,
 
 
 def fit_amplitudes(data: np.ndarray, model: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """Joint least-squares complex amplitudes, with formal uncertainties."""
     n_row, n_chan, _ = data.shape
     n_src = model.shape[2]
     A = model.reshape(n_row * n_chan, n_src)
@@ -81,19 +78,16 @@ def fit_amplitudes(data: np.ndarray, model: np.ndarray) -> Tuple[np.ndarray, np.
 
 
 def snr_of(amp: np.ndarray, sigma: np.ndarray) -> np.ndarray:
-    """Detection SNR from the amplitude MAGNITUDE."""
     with np.errstate(divide="ignore", invalid="ignore"):
         return np.where(sigma > 0, np.abs(amp) / sigma, 0.0)
 
 
 def peel(data: np.ndarray, model: np.ndarray, amp: np.ndarray) -> np.ndarray:
-    """Subtract the full modelled sky from the visibilities."""
     n_row, n_chan, n_corr = data.shape
     stokes_i = (model.reshape(n_row * n_chan, -1) @ amp).reshape(n_row, n_chan)
     return data - np.repeat(stokes_i[:, :, None], n_corr, axis=2)
 
 
 def gram_condition(model: np.ndarray) -> float:
-    """Condition number of the fit's normal matrix."""
     A = model.reshape(-1, model.shape[2])
     return float(np.linalg.cond(A.conj().T @ A))
