@@ -8,7 +8,6 @@ log = logging.getLogger(__name__)
 
 
 def decide(hdf_info: dict, mode: str = "auto") -> str:
-    """Return the MS column to use: ``DATA`` or ``CORRECTED_DATA``."""
     if mode == "never":
         return "DATA"
     if mode == "always":

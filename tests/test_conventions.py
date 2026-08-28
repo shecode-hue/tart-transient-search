@@ -7,19 +7,16 @@ from tart_transient.imaging import disko_cdelt
 
 
 def test_disko_pixel_scale():
-    """DiSkO's FITS header overstates its pixel scale by 1.485x."""
     assert disko_cdelt(2000) == pytest.approx(0.0572958, rel=1e-4)
     header_claims = 170.0 / 2000
     assert header_claims / disko_cdelt(2000) == pytest.approx(1.485, rel=1e-2)
 
 
 def test_phase_sign_is_positive():
-    """TART visibilities use the opposite sign to the textbook convention."""
     assert fitting.PHASE_SIGN == +1.0
 
 
 def test_injected_source_recovers_at_its_own_position():
-    """A synthetic source must fit strongest where it was actually placed."""
     rng = np.random.default_rng(0)
     n_row = 2000
     uvw = rng.normal(0, 1.5, size=(n_row, 3))
@@ -46,14 +43,12 @@ def test_injected_source_recovers_at_its_own_position():
 
 
 def test_snr_uses_magnitude_not_real_part():
-    """A source at non-zero phase must still register."""
-    amp = np.array([1.0 * np.exp(1j * np.pi)])   # phase 180 deg, real part -1
+    amp = np.array([1.0 * np.exp(1j * np.pi)])
     sigma = np.array([0.1])
     assert fitting.snr_of(amp, sigma)[0] == pytest.approx(10.0)
 
 
 def test_beam_merge_collapses_duplicates():
-    """Two catalogue entries for the same object must merge."""
     import pandas as pd
     from tart_transient.catalogue import merge_within_beam
 
@@ -70,14 +65,12 @@ def test_beam_merge_collapses_duplicates():
 
 
 def test_zenith_null_demands_more_of_low_elevation_peaks():
-    """A rim peak must beat a higher bar than the same SNR at zenith."""
     import numpy as np
     from tart_transient.significance import ZenithNull
 
     rng = np.random.default_rng(0)
     n = 12000
     zen = np.degrees(np.arccos(1.0 - rng.random(n) * 0.92))
-    # heavier tail below 20 deg elevation (zenith angle > 70), as measured
     snr = rng.gamma(2.0, 3.0, n)
     rim = zen > 70.0
     snr[rim] *= 1.35
@@ -92,3 +85,25 @@ def test_zenith_null_demands_more_of_low_elevation_peaks():
     assert at_rim > at_zenith * 1.1, (
         f"low-elevation threshold {at_rim:.1f} should clearly exceed "
         f"the zenith threshold {at_zenith:.1f}")
+
+
+def test_tail_fit_beats_quantile_on_a_known_exponential_tail():
+    import numpy as np
+    from tart_transient.significance import tail_threshold, trials_threshold
+
+    rng = np.random.default_rng(0)
+    scale, n_looks, alpha = 4.0, 48, 0.01
+    n = 3000
+    samples = rng.exponential(scale, n)
+    truth = -scale * np.log(alpha / n_looks)
+
+    fit = np.mean([tail_threshold(rng.exponential(scale, n), n_looks, alpha,
+                                  n_tail=300) for _ in range(30)])
+    quant = np.mean([trials_threshold(rng.exponential(scale, n), n_looks, alpha)
+                     for _ in range(30)])
+
+    assert abs(fit - truth) < abs(quant - truth), (
+        f"tail fit {fit:.2f} should beat quantile {quant:.2f} "
+        f"against truth {truth:.2f}")
+    assert quant < truth, "the empirical quantile is expected to be biased low"
+    assert abs(fit - truth) / truth < 0.15

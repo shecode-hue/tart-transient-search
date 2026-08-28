@@ -1,0 +1,12 @@
+{
+ "simbad_n": 6703,
+ "simbad_transient_types": {
+  "AGN": 84,
+  "QSO": 18,
+  "SN*": 17,
+  "X": 66,
+  "CV*": 1
+ },
+ "nvss_brightest_mJy": 279.8,
+ "tns_status": 200
+}

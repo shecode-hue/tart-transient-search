@@ -5,14 +5,14 @@ import logging
 import shutil
 import subprocess
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 log = logging.getLogger(__name__)
 
 
 def build(hdf_files: List[Path], ms_path: Path, cat_prefix: Path,
-          filter_elevation_deg: float = 5.0) -> Path:
-    """HDF -> Measurement Set, with a per-epoch source catalogue."""
+          filter_elevation_deg: float = 5.0,
+          timeout_s: Optional[int] = None) -> Path:
     if shutil.which("tart2ms") is None:
         raise RuntimeError("tart2ms not found. pip install tart2ms")
 
@@ -28,7 +28,11 @@ def build(hdf_files: List[Path], ms_path: Path, cat_prefix: Path,
            "--filter-elevation", str(filter_elevation_deg),
            "--hdf"] + [str(p) for p in hdf_files]
     log.info("tart2ms: %d hdf file(s) -> %s", len(hdf_files), ms_path)
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+    if timeout_s is None:
+        timeout_s = 1800 + 1800 * len(hdf_files)
+    log.info("tart2ms timeout %d s for %d file(s)", timeout_s, len(hdf_files))
+    proc = subprocess.run(cmd, capture_output=True, text=True,
+                          timeout=timeout_s)
     if proc.returncode != 0:
         if "--filter-elevation" in proc.stderr or "unrecognized" in proc.stderr:
             raise RuntimeError(
@@ -42,7 +46,6 @@ def build(hdf_files: List[Path], ms_path: Path, cat_prefix: Path,
 
 def calibrate(ms_path: Path, caltable_dir: Path, minsnr: float = 2.0,
               solint: str = "inf", applymode: str = "calonly") -> None:
-    """Solve and apply antenna gains with CASA."""
     from casatasks import applycal, gaincal
 
     caltable_dir = Path(caltable_dir)
@@ -63,7 +66,6 @@ def calibrate(ms_path: Path, caltable_dir: Path, minsnr: float = 2.0,
 
 
 def observation_geometry(ms_path: Path):
-    """Phase centre, frequencies, baseline length and the resolution element."""
     import numpy as np
     from casacore.tables import table
 

@@ -19,27 +19,21 @@ DEG_PER_RADIAN = 57.29577951308232
 
 
 def disko_cdelt(npix: int) -> float:
-    """Degrees per pixel that actually describe a DiSkO image.
-
-    The header's own CDELT overstates this by 1.485x. See README.
-    """
     return DEG_PER_RADIAN / (npix / 2.0)
 
 
 def load_wcs(header) -> WCS:
-    """Pixel<->sky mapping, with DiSkO's header scale corrected."""
     origin = str(header.get("ORIGIN", "") or "")
     npix = header.get("NAXIS1")
     if origin.strip().startswith("DiSkO") and npix:
         header = header.copy()
         scale = disko_cdelt(int(npix))
-        header["CDELT1"] = -abs(scale)   # RA increases toward smaller x
+        header["CDELT1"] = -abs(scale)
         header["CDELT2"] = abs(scale)
     return WCS(header).celestial
 
 
 def load_image(path: Path):
-    """Return (image, header). NaN outside DiSkO's circular field is preserved."""
     with fits.open(str(path)) as hdul:
         data = np.squeeze(hdul[0].data).astype(float)
         return data, hdul[0].header
@@ -55,7 +49,6 @@ class DiskoResult:
     siblings: List[str] = field(default_factory=list)
 
     def failure_message(self) -> str:
-        """A message that is useful even when DiSkO says nothing at all."""
         if self.returncode in (137, -9):
             head = ("DiSkO was killed by SIGKILL (exit 137) -- this is the "
                     "out-of-memory killer, not a DiSkO error. It writes no "
@@ -76,7 +69,6 @@ class DiskoResult:
 
 
 def healpix_npix_in_fov(fov_deg: float, res_deg: float) -> int:
-    """Number of HEALPix cells DiSkO will actually solve for."""
     import healpy as hp
     res_arcmin = res_deg * 60.0
     nside = 1
@@ -87,8 +79,6 @@ def healpix_npix_in_fov(fov_deg: float, res_deg: float) -> int:
 
 
 def estimate_memory_gb(fov_deg: float, res_deg: float, n_vis: int) -> float:
-    """Peak DiSkO memory in GB for these parameters."""
-    # 48 = three operator copies; calibrated, not derived
     return n_vis * healpix_npix_in_fov(fov_deg, res_deg) * 48 / 1e9
 
 
@@ -111,7 +101,6 @@ def _parse_deg(v) -> Optional[float]:
 
 
 def check_memory(params: dict, safety: float = 2.0) -> None:
-    """Refuse to start a solve that cannot fit, with the arithmetic shown."""
     fov = _parse_deg(params.get("fov", params.get("fov-deg", "")))
     res = _parse_deg(params.get("res", params.get("res-deg", "")))
     nvis = params.get("nvis")
@@ -136,7 +125,6 @@ def check_memory(params: dict, safety: float = 2.0) -> None:
 
 def image(ms_path: Path, out_fits: Path, column: str = "DATA",
           params: Optional[dict] = None, timeout_s: int = 1800) -> DiskoResult:
-    """Run DiSkO and return the FITS it wrote during THIS call."""
     if shutil.which("disko") is None:
         raise RuntimeError("disko not found. pip install disko")
 
@@ -174,13 +162,12 @@ def image(ms_path: Path, out_fits: Path, column: str = "DATA",
         if out_fits.parent.is_dir() else []
     rc = proc.returncode
     if rc == 0 and not out_fits.exists():
-        rc = 0          # keep 0: failure_message distinguishes this mode
+        rc = 0
         return DiskoResult(out_fits, rc, proc.stdout, proc.stderr, cmd, siblings)
     return DiskoResult(out_fits, rc, proc.stdout, proc.stderr, cmd, siblings)
 
 
 def find_peaks(img: np.ndarray, fwhm_pix: float, sigma: float = 5.0):
-    """DAOStarFinder, NaN-aware."""
     from astropy.stats import sigma_clipped_stats
     from photutils.detection import DAOStarFinder
 
@@ -192,3 +179,79 @@ def find_peaks(img: np.ndarray, fwhm_pix: float, sigma: float = 5.0):
         return None, median, std
     finder = DAOStarFinder(fwhm=float(fwhm_pix), threshold=sigma * std)
     return finder(np.where(mask, img, median) - median), median, std
+
+
+def lm_to_radec(l, m, ra0_deg, dec0_deg):
+    ra0, dec0 = np.radians(ra0_deg), np.radians(dec0_deg)
+    n = np.sqrt(np.clip(1.0 - l*l - m*m, 0.0, 1.0))
+    dec = np.arcsin(np.clip(m*np.cos(dec0) + n*np.sin(dec0), -1.0, 1.0))
+    ra = ra0 + np.arctan2(l, n*np.cos(dec0) - m*np.sin(dec0))
+    return np.degrees(ra) % 360.0, np.degrees(dec)
+
+
+def time_window_peak_map(uvw, freqs_hz, data, times, ra0_deg, dec0_deg,
+                         n_side=110, n_windows=6, max_zenith_deg=85.0,
+                         chunk=400):
+    from .fitting import C_LIGHT, PHASE_SIGN
+
+    ut = np.unique(times)
+    n_windows = int(max(1, min(n_windows, len(ut))))
+    gx = np.linspace(-1.0, 1.0, int(n_side))
+    L, M = np.meshgrid(gx, gx)
+    lim = np.sin(np.radians(max_zenith_deg))
+    good = (L*L + M*M) <= lim*lim
+    N = np.sqrt(np.clip(1.0 - L*L - M*M, 0.0, 1.0))
+    S = np.stack([L[good], M[good], N[good] - 1.0], axis=1)
+
+    wl = C_LIGHT / np.asarray(freqs_hz, dtype=float)
+    best = np.full(S.shape[0], -np.inf)
+    which = np.zeros(S.shape[0], dtype=int)
+
+    for w, ch in enumerate(np.array_split(ut, n_windows)):
+        sel = np.isin(times, ch)
+        if sel.sum() < 4:
+            continue
+        u = uvw[sel][:, 0][:, None] / wl[None, :]
+        v = uvw[sel][:, 1][:, None] / wl[None, :]
+        ww = uvw[sel][:, 2][:, None] / wl[None, :]
+        V = data[sel].reshape(sel.sum(), data.shape[1], -1)[:, :, 0]
+        V = V.astype(np.complex128).reshape(-1)
+        base = np.column_stack([u.reshape(-1), v.reshape(-1), ww.reshape(-1)])
+        for i in range(0, S.shape[0], chunk):
+            Mm = np.exp(PHASE_SIGN * 2.0j * np.pi * (base @ S[i:i+chunk].T))
+            num = np.abs((np.conj(Mm) * V[:, None]).sum(axis=0))
+            den = (np.abs(Mm) ** 2).sum(axis=0)
+            val = num / np.maximum(den, 1e-30)
+            upd = val > best[i:i+chunk]
+            best[i:i+chunk][upd] = val[upd]
+            which[i:i+chunk][upd] = w
+        log.info("  window %d/%d imaged", w + 1, n_windows)
+
+    out = np.full(L.shape, np.nan)
+    win = np.full(L.shape, -1, dtype=int)
+    out[good] = best
+    win[good] = which
+    return out, win, gx, gx
+
+
+def peaks_from_map(amap, wmap, gx, ra0_deg, dec0_deg, n_peaks=60, min_sep_pix=3):
+    finite = np.isfinite(amap)
+    if not finite.any():
+        return []
+    flat = np.where(finite, amap, -np.inf)
+    order = np.argsort(flat, axis=None)[::-1]
+    taken, out = [], []
+    for idx in order:
+        if len(out) >= n_peaks:
+            break
+        i, j = np.unravel_index(idx, flat.shape)
+        if not np.isfinite(flat[i, j]):
+            continue
+        if any((i-a)**2 + (j-b)**2 < min_sep_pix**2 for a, b in taken):
+            continue
+        taken.append((i, j))
+        ra, dec = lm_to_radec(gx[j], gx[i], ra0_deg, dec0_deg)
+        out.append({"ra_deg": float(ra), "dec_deg": float(dec),
+                    "map_value": float(flat[i, j]),
+                    "window": int(wmap[i, j])})
+    return out

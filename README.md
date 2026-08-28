@@ -1,149 +1,137 @@
-# tart-transient-search
+# TART transient search
 
-A transient search pipeline for the [TART](https://tart.elec.ac.nz) radio
-telescope array. Downloads visibilities from the public archive, builds a
-Measurement Set, models and subtracts every catalogued GNSS satellite, then
-tests whatever is left for real astrophysical signal.
+A transient-detection pipeline for the TART radio telescope array, and the
+detection of a solar radio burst on 2025-11-11.
 
-Built on the standard TART toolchain: `tart_tools`, `tart2ms`, `DiSkO`, CASA.
+TART is a 24-antenna all-sky array observing at 1575.42 MHz. It records
+correlations between antenna pairs, not images — 276 numbers per second. Images
+are computed afterwards and are used here only to generate candidate positions;
+every detection decision is made on the raw visibilities.
+
+---
+
+## The result
+
+A solar radio burst, found with no prior knowledge of its position or time, and
+independently recorded by NOAA/RSTN at 53,000 sfu, 1415 MHz.
+
+**Time series** — 3 hours at na-unam, 176 files, 361 intervals of 30 s:
+
+| | |
+|---|---|
+| onset | 10:01:11 UTC |
+| peak | 10:03:11 UTC |
+| end | 10:03:41 UTC |
+| duration | 150 s (120 s rise, 30 s decay) |
+| significance | 13.3 sigma; next source 5.7 |
+
+**Imaging** — the full pipeline run separately at five moments:
+
+| epoch | time UTC | separation | SNR | threshold | rank |
+|---|---|---|---|---|---|
+| pre | 09:54:30 | — | — | — | nothing within a beam |
+| onset | 10:00:39 | 0.77 deg | 29.6 | 28.1 | 2 of 63 |
+| peak | 10:02:42 | 0.20 deg | 55.5 | 38.5 | 1 of 59 |
+| decay | 10:03:44 | 0.40 deg | 26.7 | 29.2 | 2 of 68 |
+| post | 10:09:53 | — | — | — | nothing within a beam |
+
+`results/unam_event_20251111/figures/epochs.png`
+
+**Multi-site** — the same burst at na-unam, za-rhodes, ghana and mu-udm, peak
+times agreeing to 0.01 min, cross-correlation r = +0.978, and a 14.5 sigma
+excess toward the Sun over eight control directions.
 
 ---
 
 ## Quick start
 
 ```bash
-pip install -r requirements.txt
+python3 scripts/apply_patches.py
+PYTHONPATH=src python3 -m pytest tests/ -q
 
-# fetch data, build the MS, calibrate, search — one command
-tart-transient run --config config/za-hammanskraal.yaml
+PYTHONPATH=src python3 -m tart_transient timeseries \
+  --sites na-unam --peak "2025-11-11T10:00:00+00:00" \
+  --window 180 --interval 30 --out runs/ts
+
+PYTHONPATH=src python3 -m tart_transient run --config config/unam-ev-peak.yaml
 ```
 
-Or step by step:
-
-```bash
-tart-transient download --config config/za-hammanskraal.yaml
-tart-transient build    --config config/za-hammanskraal.yaml
-tart-transient search   --config config/za-hammanskraal.yaml
-tart-transient report   --config config/za-hammanskraal.yaml
-```
-
-Outputs land in `runs/<name>/` — Measurement Set, FITS for CARTA, a figure per
-stage, and a JSON record of every number.
+`docs/COMMANDS.md` has the full sequence from a cold machine.
 
 ---
 
-## What it does
+## Stages
 
-| stage | what happens |
+| stage | what it does |
 |---|---|
-| **download** | Pull HDF visibilities from the TART S3 archive |
-| **build** | `tart2ms` → Measurement Set + per-epoch source catalogues; decide whether to calibrate |
-| **model** | Catalogue at the horizon, merge sources closer than the beam |
-| **fit** | Coherent DFT fit of every source, positions tracked per visibility row |
-| **peel** | Subtract the whole known sky model |
-| **image** | DiSkO before and after |
-| **search** | Test every residual peak in the visibility domain, with a trials-corrected threshold |
+| `download` | fetch HDF, selected by observation time |
+| `build` | measurement set, per-second satellite positions, calibration decision |
+| `search` | model, subtract, image, find peaks, test each |
+| `run` | all three |
+| `timeseries` | fit every catalogued source per interval across hours |
+| `transient` | light curve at one direction, plus control directions |
+| `compare` | difference two completed runs |
 
 ---
 
-## Seven things this pipeline does differently
+## How a detection is decided
 
-These are not stylistic choices. Each was established by measurement on real
-TART data; the numbers below are the record, and the code is kept terse.
+Images generate candidate positions. Nothing else. Every significance test runs
+on the raw visibilities.
 
-**1. The image is not the detector.** DiSkO's regularised reconstruction
-correlates only r ≈ 0.55 with a direct transform of the same visibilities and
-shares just 4 of its 20 brightest positions — the lasso prior redistributes
-flux. Image peaks are treated as *candidate positions*; every one is then tested
-by a coherent fit against the visibilities. See `search.py`.
+A candidate must pass four gates:
 
-**2. The detection threshold is measured, not assumed.** A fixed 5σ cut is
-invalid here: 64–86% of random empty-sky positions pass it, because the
-residuals are not independent (276 baselines re-measured every integration
-understate σ by roughly √60). The threshold comes from fitting ~400 random sky
-directions in the same data. See `significance.py`.
+1. **Above the measured noise.** 20,000 random empty directions are fitted in
+   the same data. A fixed 5 sigma cut is invalid here — 64-86% of empty sky
+   passes it, because the same 276 baselines are re-measured every second.
+2. **Above the noise at its own elevation.** The null tail is ~35% heavier below
+   20 degrees.
+3. **Above a trials-corrected threshold**, obtained by fitting the tail of the
+   null rather than reading an order statistic.
+4. **Not within one beam of a catalogued object**, checked against the full
+   catalogue rather than the modelled subset.
 
-**3. Known satellites are subtracted without a detection test.** They have
-published ephemerides — their existence is not in question, only their
-brightness. Gating subtraction on significance leaves known sources in the map,
-each spraying 10–30% sidelobes. See `fitting.py`.
-
-**4. The satellite catalogue reaches the horizon.** `tart2ms` defaults to a
-hardcoded 45° elevation cut; a TART image spans 170° FOV, down to ~5°. On one
-test file that meant 14 catalogued satellites out of 67 actually above the
-horizon. See `catalogue.py` and `PATCHES.md`.
-
-**5. The detection threshold rises toward the horizon.** The null SNR
-distribution is not uniform across a 170 deg field. From 24,000 null draws on
-real residual visibilities, the median and 90th percentile are flat to within a
-few percent, but the 99th percentile jumps ~35% below 20 deg elevation:
-
-| elevation | median | 90th | 99th |
-|-----------|--------|------|------|
-| 70-90 deg | 5.68   | 11.18| 18.95|
-| 40-55 deg | 5.62   | 11.70| 18.09|
-| 20-30 deg | 5.58   | 11.05| 17.34|
-| 12-20 deg | 5.80   | 11.72| 25.28|
-| 5-12 deg  | 5.89   | 11.38| 24.13|
-
-Near the horizon the same 276 baselines constrain a direction weakly, so the fit
-occasionally finds a large spurious amplitude. A single global cut judges rim
-peaks against a bar set by well-behaved sky. `ZenithNull` in `significance.py`
-normalises by the local *tail* quantile in equal-count elevation bins --
-normalising by the 90th percentile corrects nothing, because the 90th percentile
-carries none of the effect. Beware small samples: a 99th percentile from 200
-draws is 19.0 +/- 2.5 on this data, wide enough to invent the whole effect.
-
-**6. DiSkO's memory is checked before the solve starts.** Peak usage is
-`n_vis * n_pix * 48` bytes -- it holds three copies of the operator (complex
-`gamma`, the real augmented `concatenate(real, imag)`, and sklearn's lasso copy).
-At `res=0.5deg, nvis=10000` over a 170 deg field that is 43 GB; the OOM killer
-takes it with **no error message, no output, and exit code 137**, which reads as
-an unexplained failure after several minutes of work. `imaging.check_memory()`
-refuses to start and shows the arithmetic. The shipped `res=1.0deg` is also the
-physically honest choice: the array resolves lambda/B_max = 3.21 deg, so 0.5 deg
-cells oversample the beam 6x and are constrained by the lasso prior, not by data.
-
-**7. DiSkO's FITS pixel scale is corrected on read.** The header declares
-`CDELT = fov/npix` with `CTYPE = RA---SIN`, but the image is a linear
-direction-cosine grid, so the correct value is `(180/π)/(npix/2)` — the header
-overstates the scale by 1.485×. See `imaging.py`, and `tests/test_conventions.py`
-which locks this down.
-
----
-
-## Upstream patches
-
-Two changes to installed packages are required. `PATCHES.md` documents them and
-`scripts/apply_patches.py` applies them idempotently.
+A source that brightens partway through an observation is invisible to a single
+image of the whole span: one amplitude is fitted, so subtraction removes too
+much early and too little at peak, and the average cancels. Each time window is
+therefore imaged separately and the pixel-wise maximum kept.
 
 ---
 
 ## Layout
 
 ```
-config/            run configuration, one YAML per site
-recipes/           Stimela recipe for tart2ms + CASA calibration
-src/tart_transient/
-    download.py    TART archive
-    catalogue.py   sky model, epoch mapping, beam merging
-    imaging.py     DiSkO wrapper, WCS correction
-    fitting.py     DFT model, joint fit, peeling
-    significance.py empirical null, trials correction
-    search.py      transient search
-    report.py      figures and summary
-    cli.py         command line entry point
-tests/             convention regression tests
-runs/              outputs (gitignored)
+README.md             this file
+src/tart_transient/   the pipeline, 16 modules
+tests/                convention tests
+config/               the five epoch configs, plus example.yaml
+scripts/              apply_patches.py
+docs/                 RESEARCH.md TRANSIENTS.md COMMANDS.md FLOW.md RUNBOOK.md
+results/              figures, FITS and tables
 ```
 
-## Requirements
+`results/unam_event_20251111/` is organised by epoch:
 
-Python 3.10+, and the TART toolchain (`tart_tools`, `tart2ms`, `disko`,
-`python-casacore`, `casatasks`). See `requirements.txt`.
+```
+fits/pre/  fits/onset/  fits/peak/  fits/decay/  fits/post/
+figures/pre/ ...        figures/epochs.png  lightcurve.png  timeseries.png
+tables/pre/ ...         events.json  ranked_variability.json
+```
 
 ---
 
-## License
+## Requirements
 
-MIT -- see `LICENSE`.
+Python 3.12, `tart2ms`, `disko`, `casacore`, `casatasks`, `astropy`, `h5py`,
+`minio`. Two upstream patches are required — see `PATCHES.md`, applied by
+`scripts/apply_patches.py`.
+
+---
+
+## Instrument limits
+
+TART's detection floor is of order 10^6 Jy in a 1-second sample. Cassiopeia A,
+the brightest steady radio source in the sky, is ~500x below it. Of the known
+radio transient classes only solar bursts are reachable; `docs/TRANSIENTS.md`
+gives the full comparison. Fast transients are additionally diluted by the
+1-second integration.
