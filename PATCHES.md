@@ -8,10 +8,10 @@ worth reporting to the TART maintainers.
 
 ---
 
-## 1. `tart2ms` — expose the satellite elevation cut
+## 1. `tart2ms`: expose the satellite elevation cut
 
 `tart2ms` filters the GNSS catalogue at a hardcoded **45° elevation**, with no
-CLI or recipe parameter. A TART image spans **170° FOV** — down to ~5°.
+CLI or recipe parameter. A TART image spans **170° FOV**, down to ~5°.
 
 Measured at za-hammanskraal, lat −25.24 lon 28.32, 2025-10-09T23:59Z:
 
@@ -47,7 +47,7 @@ geostationary communications satellites and are neither modelled nor subtracted.
 
 ---
 
-## 2. `tartcargo` — accept the new parameter in the cab schema
+## 2. `tartcargo`: accept the new parameter in the cab schema
 
 Stimela validates recipe parameters against the cab schema, so
 `filter-elevation` must be declared in `tartcargo/tart2ms.yml` for a recipe to
@@ -55,14 +55,14 @@ pass it.
 
 ---
 
-## Not patched — worked around instead
+## Not patched, worked around instead
 
 **DiSkO FITS pixel scale.** The header declares `CTYPE = RA---SIN` with
 `CDELT = fov/npix`, but the image is a linear direction-cosine grid, so the
 correct value is `(180/π)/(npix/2)`. The header overstates the scale by
 **1.485×**. Corrected on read in `imaging.load_wcs()` rather than patching
 DiSkO, since the official pipeline never writes FITS (it keeps the `.sphere`
-and renders with `disko-draw`) — this sits on a code path upstream does not
+and renders with `disko-draw`); this sits on a code path upstream does not
 exercise. `tests/test_conventions.py` locks the correction down.
 
 **CASA `plotms` in the reference recipe.** Four cosmetic plotting steps sit

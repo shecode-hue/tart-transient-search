@@ -1,4 +1,4 @@
-FITS for the pre epoch are on disk here but not committed — 16 MB each.
+FITS for the pre epoch are on disk here but not committed; 16 MB each.
 
 Regenerate:
 
