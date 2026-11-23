@@ -154,10 +154,10 @@ def figure(res, ranked, out_path, n_show=6):
         ax[0].plot(t, rec["amp"], "-", lw=1.6,
                    label="%s  (%.0f sigma)" % (r["name"][:26], r["sigma"]))
     ax[0].set_ylabel("|fitted amplitude|")
-    ax[0].set_title("Most deviant sources - %s from %s UTC, %.0f s intervals"
+    ax[0].set_title("%s  %s UTC  %.0f s intervals"
                     % (res["config"].get("name", "?"),
                        Time(t0, format="unix").iso[:19], res["interval_s"]),
-                    fontsize=12)
+                    fontsize=11)
     ax[0].legend(fontsize=8, ncol=2)
     ax[0].grid(alpha=.25)
 
@@ -173,12 +173,11 @@ def figure(res, ranked, out_path, n_show=6):
         grid = np.linspace(0, max(c[0].max() for c in allc), 200)
         stack = np.vstack([np.interp(grid, t, y) for t, y in allc])
         ax[1].plot(grid, np.median(stack, axis=0), lw=2.4, color="#d62728",
-                   label="median of all sources (common mode)")
+                   label="median of all sources")
         ax[1].legend(fontsize=9)
     ax[1].set_xlabel("minutes from start")
     ax[1].set_ylabel("relative to own median")
-    ax[1].set_title("Every source normalised - a common rise means one bright "
-                    "source is leaking into all of them", fontsize=11)
+    ax[1].set_title("normalised to own median", fontsize=10)
     ax[1].grid(alpha=.25)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,4 +1,5 @@
 runs/
+docs/
 *.ms/
 *.hdf
 *.fits
@@ -11,13 +12,4 @@ build/
 dist/
 .pytest_cache/
 .ipynb_checkpoints/
-logs/
-*.log
-casa-*.log
-tart2ms.*.log
-.tartcache/
 .DS_Store
-.idea/
-.vscode/
-*.swp
-docs/

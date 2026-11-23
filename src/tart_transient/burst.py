@@ -171,7 +171,7 @@ def figure(curves: dict, peak_iso: str, out_path: Path) -> Path:
     ax[1].axvline(0, color="k", ls="--", lw=1.4)
     ax[1].set_xlabel("minutes from the reported burst peak")
     ax[1].set_ylabel("brightness\n(relative to pre-burst)")
-    ax[1].set_title("%s: the rise appears only toward the Sun" % s0)
+    ax[1].set_title("%s  Sun vs control directions" % s0, fontsize=11)
     ax[1].legend(fontsize=9)
     ax[1].grid(alpha=.25)
 

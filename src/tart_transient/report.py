@@ -38,9 +38,6 @@ def input_data(hdf_info, vis_abs, gains, phases, out: Path):
     ax[2].bar(np.arange(len(phases)), np.degrees(phases), color=AMBER)
     ax[2].set_xlabel("antenna"); ax[2].set_ylabel("phase (deg)")
     ax[2].set_title("stored phases", fontsize=10)
-    verdict = ("calibration recorded -> use DATA" if hdf_info["gains_stored"]
-               else "NO calibration recorded -> solve gains")
-    fig.suptitle("1 - input data: {}".format(verdict), fontsize=12)
     fig.tight_layout(); fig.savefig(out, dpi=115); plt.close(fig)
 
 
@@ -60,7 +57,6 @@ def sky_model(uvw_lambda, cat_lm, eigenvalues, beam_deg, n_raw, n_merged,
                    color=TEAL, ms=4)
     ax[2].set_xlabel("mode"); ax[2].set_ylabel("|eigenvalue|")
     ax[2].set_title("conditioning: {:.1f}".format(cond), fontsize=10)
-    fig.suptitle("2 - sky model and fit conditioning", fontsize=12)
     fig.tight_layout(); fig.savefig(out, dpi=115); plt.close(fig)
 
 
@@ -76,9 +72,8 @@ def snr_vs_null(names, snr, threshold, null_median, out: Path):
     ax.set_yticks(np.arange(len(order))[::-1])
     ax.set_yticklabels([names[i].split("_(")[0][:24] for i in order], fontsize=7)
     ax.set_xlabel("coherent fit SNR"); ax.legend(fontsize=9, loc="lower right")
-    ax.set_title("3 - every source against a threshold measured from this data\n"
-                 "green = brighter than empty sky ever gets ({}/{})".format(
-                     int((snr >= threshold).sum()), len(names)), fontsize=11)
+    ax.set_title("{}/{} above threshold".format(
+        int((snr >= threshold).sum()), len(names)), fontsize=10)
     fig.tight_layout(); fig.savefig(out, dpi=115); plt.close(fig)
 
 
@@ -87,13 +82,11 @@ def before_after(before, after, removed, half, n_peeled, power, out: Path):
     vm = _sky(ax[0], before, half, "BEFORE  rms={:.4f}".format(np.nanstd(before)))
     _sky(ax[1], after, half, "AFTER  rms={:.4f}".format(np.nanstd(after)), vmax=vm)
     _sky(ax[2], removed, half, "REMOVED  rms={:.4f}".format(np.nanstd(removed)))
-    fig.suptitle("4 - peeled {} components, {:.1%} of visibility power removed".format(
-        n_peeled, power), fontsize=12)
     fig.tight_layout(); fig.savefig(out, dpi=115); plt.close(fig)
 
 
 def effectiveness(before, after, power, rms_change, peak_change, out: Path):
-    fig, ax = plt.subplots(1, 3, figsize=(17, 4.8))
+    fig, ax = plt.subplots(1, 2, figsize=(12, 4.8))
     ax[0].hist(before[np.isfinite(before)], bins=90, alpha=.6, color=TEAL, label="before")
     ax[0].hist(after[np.isfinite(after)], bins=90, alpha=.6, color=AMBER, label="after")
     ax[0].set_yscale("log"); ax[0].legend(fontsize=9)
@@ -105,18 +98,6 @@ def effectiveness(before, after, power, rms_change, peak_change, out: Path):
                             GREEN if peak_change < 0 else AMBER])
     ax[1].bar_label(bars, fmt="%+.1f%%", fontsize=10)
     ax[1].axhline(0, color=GREY, lw=1); ax[1].set_ylabel("% change")
-    ax[1].set_title("what changed", fontsize=10)
-    ax[2].axis("off")
-    ax[2].text(0, .5,
-               "Visibility power fell {:.1%} - the subtraction is real.\n\n"
-               "Image RMS {:+.1f}%, peaks {:+.1f}%.\n\n"
-               "Where the two disagree, trust the visibility numbers:\n"
-               "DiSkO's regularised image correlates only r~0.55 with a\n"
-               "direct transform of the same data and shares just 4 of\n"
-               "its 20 brightest positions - the prior redistributes flux."
-               .format(power, rms_change, peak_change),
-               fontsize=10, va="center", linespacing=1.6)
-    fig.suptitle("5 - did the clean help?", fontsize=12)
     fig.tight_layout(); fig.savefig(out, dpi=115); plt.close(fig)
 
 
@@ -184,9 +165,6 @@ def transient_search(after, half, wcs, npix, pix, result, out: Path):
         ax[3].grid(alpha=.25)
         ax[3].set_title("SNR vs timescale", fontsize=11)
 
-    fig.suptitle("transient search: %d peaks, %d above threshold, %d unexplained"
-                 % (result["n_peaks"], result["n_passed_single_look"],
-                    result["n_unexplained"]), fontsize=12)
     fig.tight_layout(); fig.savefig(out, dpi=115); plt.close(fig)
 
 def write_summary(record: dict, out: Path):
@@ -222,6 +200,4 @@ def epoch_comparison(quiet, burst, diff, record, out):
         ax[1][1].set_title("peak %.4f   (%.1fx brighter)"
                            % (tgt["burst"], tgt["ratio"]), fontsize=11)
         ax[1][2].set_title("change %.1f rms" % tgt["change_rms"], fontsize=11)
-    fig.suptitle("Same pipeline, two epochs — %s vs %s"
-                 % (record["quiet"]["run"], record["burst"]["run"]), fontsize=13)
     fig.tight_layout(); fig.savefig(out, dpi=115); plt.close(fig)
