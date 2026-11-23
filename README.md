@@ -3,11 +3,6 @@
 A transient-detection pipeline for the [TART](https://tart.elec.ac.nz) radio
 telescope array, and the detection of a solar radio burst on 2025-11-11.
 
-TART is a 24-antenna all-sky array observing at 1575.42 MHz. It records
-correlations between antenna pairs; images are computed afterwards and are used
-only to generate candidate positions. Every detection decision is made on the
-raw visibilities.
-
 The 2025-11-11 burst (onset 10:01:11 UTC, peak 10:03:11 UTC, 13.3 sigma at
 na-unam, seen at four sites, recorded independently by NOAA/RSTN) is in
 `results/unam_event_20251111/`, with figures, FITS and tables per epoch.
