@@ -1,4 +1,3 @@
-"""Long-baseline time series: every catalogued source, every interval."""
 from __future__ import annotations
 
 import json

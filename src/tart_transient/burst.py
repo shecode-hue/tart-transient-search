@@ -1,4 +1,3 @@
-"""Solar radio burst detection, direct from HDF visibilities."""
 from __future__ import annotations
 
 import logging

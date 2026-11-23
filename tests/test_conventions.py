@@ -1,4 +1,3 @@
-"""Regression tests for the two conventions that cost the most to find."""
 import numpy as np
 import pytest
 

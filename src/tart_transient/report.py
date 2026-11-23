@@ -1,4 +1,3 @@
-"""Figures and the run record."""
 from __future__ import annotations
 
 import json

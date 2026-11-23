@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Apply the upstream patches described in PATCHES.md."""
 from __future__ import annotations
 
 import sys

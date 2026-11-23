@@ -1,4 +1,3 @@
-"""Fetch visibilities from the public TART archive."""
 from __future__ import annotations
 
 import logging

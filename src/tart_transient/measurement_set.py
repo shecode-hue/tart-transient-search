@@ -1,4 +1,3 @@
-"""Build a Measurement Set from HDF, and calibrate it if needed."""
 from __future__ import annotations
 
 import logging

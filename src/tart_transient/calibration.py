@@ -1,4 +1,3 @@
-"""Whether to calibrate, and how."""
 from __future__ import annotations
 
 import logging

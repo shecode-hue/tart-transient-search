@@ -1,4 +1,3 @@
-"""Transient search on the residual visibilities."""
 from __future__ import annotations
 
 import logging

@@ -1,4 +1,3 @@
-"""Coherent DFT model, joint amplitude fit, and peeling."""
 from __future__ import annotations
 
 import logging

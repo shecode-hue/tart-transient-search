@@ -1,4 +1,3 @@
-"""Detection thresholds measured from the data"""
 from __future__ import annotations
 
 import logging

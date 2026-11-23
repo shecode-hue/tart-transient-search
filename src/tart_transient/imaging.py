@@ -1,4 +1,3 @@
-"""DiSkO imaging, and the FITS pixel-scale correction it needs."""
 from __future__ import annotations
 
 import logging
